@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Panel Sensorial</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- PapaParse para CSV robusto (BOM, ; , comas, headers, etc.) -->
+  <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+  <style>
+    input[type="range"]::-webkit-slider-thumb{ -webkit-appearance: none; width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#dc2626,#991b1b);cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.5);border:3px solid #fff}
+    input[type="range"]::-moz-range-thumb{ width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#dc2626,#991b1b);cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.5);border:3px solid #fff}
+  </style>
+</head>
+<body class="bg-slate-900">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    // Iconos simples (inline SVG)
+    const Icon = ({path, className="w-full h-full"}) => (
+      <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={path} />
+      </svg>
+    );
+    const Wine = () => <Icon path="M12 8v13m0-13V6a2 2 0 112 2h-2m0 0V5.5A2.5 2.5 0 109.5 8H12m-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" />;
+    const ChevronRight = () => <Icon path="M9 5l7 7-7 7" />;
+    const ChevronLeft  = () => <Icon path="M15 19l-7-7 7-7" />;
+    const CheckCircle  = () => <Icon path="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />;
+    const DownloadIcon = () => <Icon className="w-full h-full" path="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />;
+    const MailIcon = () => (
+      <svg className="w-full h-full" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M20 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V6a2 2 0 00-2-2zm0 2l-8 5L4 6h16zm0 12H4V8l8 5 8-5v10z"/>
+      </svg>
+    );
+
+    function useCSVLoader() {
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [diseno, setDiseno] = useState([]);
+      const [atributos, setAtributos] = useState([]);
+      const [evaluadores, setEvaluadores] = useState([]);
+      const [needsManualUpload, setNeedsManualUpload] = useState(false);
+
+      useEffect(() => {
+        // Intenta leer automáticamente los CSV del mismo folder
+        (async () => {
+          try {
+            const d = await fetchCSV('diseno.csv');
+            const a = await fetchCSV('atributos.csv');
+            const parsedDiseno = parseDiseno(d);
+            const parsedAtributos = parseAtributos(a);
+            if (!parsedDiseno.length || !parsedAtributos.length) {
+              throw new Error('CSV vacíos o con encabezados no reconocidos.');
+            }
+            setDiseno(parsedDiseno);
+            setAtributos(parsedAtributos);
+            setEvaluadores([...new Set(parsedDiseno.map(r => String(r.Valuador).trim()))].sort());
+            setLoading(false);
+          } catch (e) {
+            console.warn('Fallo lectura automática. Se habilita carga manual.', e);
+            setNeedsManualUpload(true);
+            setLoading(false);
+          }
+        })();
+      }, []);
+
+      const onManualUpload = async (fileDiseno, fileAtributos) => {
+        setLoading(true);
+        try {
+          const [d, a] = await Promise.all([readFile(fileDiseno), readFile(fileAtributos)]);
+          const parsedDiseno = parseDiseno(d);
+          const parsedAtributos = parseAtributos(a);
+          if (!parsedDiseno.length || !parsedAtributos.length) {
+            throw new Error('No se pudieron leer correctamente los CSV.');
+          }
+          setDiseno(parsedDiseno);
+          setAtributos(parsedAtributos);
+          setEvaluadores([...new Set(parsedDiseno.map(r => String(r.Valuador).trim()))].sort());
+          setNeedsManualUpload(false);
+          setError(null);
+        } catch (e) {
+          console.error(e);
+          setError('Error al leer los CSV subidos. Verificá encabezados y separadores.');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return { loading, error, diseno, atributos, evaluadores, needsManualUpload, onManualUpload };
+    }
+
+    // -------- Lectura CSV con PapaParse --------
+    async function fetchCSV(path) {
+      const res = await fetch(path + '?v=' + Date.now(), { cache: 'no-store' });
+      if (!res.ok) throw new Error('No se pudo obtener ' + path + ' (' + res.status + ')');
+      const text = await res.text();
+      return text;
+    }
+
+    function readFile(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsText(file);
+      });
+    }
+
+    function parseDiseno(csvText) {
+      const parsed = Papa.parse(csvText, {
+        header: true,
+        skipEmptyLines: 'greedy',
+        dynamicTyping: true,
+        delimiter: guessDelimiter(csvText),
+      });
+      // Normalizar headers (case-insensitive)
+      const rows = (parsed.data || []).map(r => {
+        const obj = {};
+        Object.keys(r).forEach(k => {
+          obj[k && k.trim()] = typeof r[k] === 'string' ? r[k].trim() : r[k];
+        });
+        return obj;
+      });
+      // Mapear nombres esperados
+      const mapRow = (r) => ({
+        Valuador: r.Valuador ?? r.valuador ?? r.Evaluador ?? r.evaluador ?? r.Panelista ?? r.panelista,
+        Muestra:  Number(r.Muestra ?? r.muestra ?? r.Sample ?? r.sample ?? r.Orden ?? r.orden ?? 0),
+        NombreProducto: String(r.NombreProducto ?? r.nombreProducto ?? r.Producto ?? r.producto ?? r.MuestraNombre ?? r.muestraNombre ?? ''),
+        CodigoProducto: String(r.CodigoProducto ?? r.codigoProducto ?? r.Codigo ?? r.codigo ?? r.Código ?? r['Código'] ?? ''),
+      });
+      const clean = rows.map(mapRow).filter(x => x.Valuador && x.NombreProducto && x.CodigoProducto);
+      return clean;
+    }
+
+    function parseAtributos(csvText) {
+      const parsed = Papa.parse(csvText, {
+        header: true,
+        skipEmptyLines: 'greedy',
+        dynamicTyping: false,
+        delimiter: guessDelimiter(csvText),
+      });
+      const rows = parsed.data || [];
+      // Si el archivo tiene columnas "Nombre,Valores" tomamos Nombre;
+      // si no, tomamos la primera columna no vacía
+      const attrs = [];
+      if (rows.length && ('Nombre' in rows[0] || 'nombre' in rows[0])) {
+        for (const r of rows) {
+          const v = (r.Nombre ?? r.nombre ?? '').toString().trim();
+          if (v) attrs.push(v);
+        }
+      } else {
+        // Fallback: tomar la primera columna de cada fila (sin header)
+        const parsed2 = Papa.parse(csvText, { header: false, skipEmptyLines: 'greedy', delimiter: guessDelimiter(csvText) });
+        const lines = parsed2.data || [];
+        // saltar la cabecera si parece ser cabecera (contiene "Nombre" o "Atributo")
+        for (let i = 0; i < lines.length; i++) {
+          const first = (lines[i][0] ?? '').toString().trim();
+          if (!first) continue;
+          if (i === 0 && /nombre|atributo/i.test(first)) continue;
+          attrs.push(first);
+        }
+      }
+      // normalizar espacios extra
+      return attrs.map(a => a.replace(/\s+/g, ' ').trim());
+    }
+
+    function guessDelimiter(text) {
+      // heurística simple ; vs , 
+      const firstLines = text.split(/\r?\n/).slice(0, 5).join('\n');
+      const commas = (firstLines.match(/,/g) || []).length;
+      const semis  = (firstLines.match(/;/g) || []).length;
+      return semis > commas ? ';' : ',';
+    }
+
+    // ===== CONFIGURACIÓN NUBE =====
+    // Pegá acá la URL de tu Web App de Google Apps Script (termina en /exec)
+    const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxVC1I-xsX7N52FHU1npXYFJMsq9eoE3d1IhHaphffYIq6xDzDc1Aa2YrnwvaxJh91wag/exec';
+    const QUEUE_KEY = 'panel_sensorial_pendientes';
+
+    // Cola local: si no hay internet, las respuestas quedan guardadas en el
+    // navegador y se reenvían solas cuando vuelve la conexión.
+    function leerCola() {
+      try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); } catch { return []; }
+    }
+    function guardarCola(q) {
+      try { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); } catch {}
+    }
+    function encolar(payload) {
+      const q = leerCola().filter(p => p.id !== payload.id); // reemplaza si ya estaba
+      q.push(payload);
+      guardarCola(q);
+    }
+
+    // Envía a Google Sheets. Se usa text/plain para evitar el "preflight" CORS
+    // (Apps Script no lo soporta; por eso con application/json fallaba).
+    async function enviarANube(payload) {
+      const res = await fetch(GOOGLE_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Error del servidor');
+      return data;
+    }
+
+    // Intenta enviar todo lo pendiente. Devuelve cuántos quedan.
+    async function vaciarCola() {
+      const q = leerCola();
+      const enviados = new Set();
+      for (const p of q) {
+        try { await enviarANube(p); enviados.add(p.id + '@' + p.timestamp); } catch {}
+      }
+      // Re-leer la cola por si se agregó algo mientras enviábamos
+      const restantes = leerCola().filter(p => !enviados.has(p.id + '@' + p.timestamp));
+      guardarCola(restantes);
+      return restantes.length;
+    }
+
+    function App() {
+      const { loading, error, diseno, atributos, evaluadores, needsManualUpload, onManualUpload } = useCSVLoader();
+      const [vista, setVista] = useState('seleccion');
+      const [valuador, setValuador] = useState('');
+      const [muestras, setMuestras] = useState([]);
+      const [idx, setIdx] = useState(0);
+      const [valores, setValores] = useState({});
+      const [buffer, setBuffer] = useState([]);
+      const [resultados, setResultados] = useState([]);
+      const [manualDiseno, setManualDiseno] = useState(null);
+      const [manualAtributos, setManualAtributos] = useState(null);
+      const [sesionId, setSesionId] = useState('');
+      const [pendientes, setPendientes] = useState(leerCola().length);
+      const [enviando, setEnviando] = useState(false);
+
+      // Reintento automático: al cargar, al volver la conexión y cada 30 s
+      useEffect(() => {
+        const intentar = async () => {
+          if (!leerCola().length) return;
+          setPendientes(await vaciarCola());
+        };
+        intentar();
+        window.addEventListener('online', intentar);
+        const t = setInterval(intentar, 30000);
+        return () => { window.removeEventListener('online', intentar); clearInterval(t); };
+      }, []);
+
+      useEffect(() => {
+        if (atributos.length > 0) {
+          const init = {};
+          atributos.forEach(a => init[a] = 0);
+          setValores(init);
+        }
+      }, [atributos]);
+
+      const handleSeleccionValuador = (v) => {
+        const m = diseno.filter(d => String(d.Valuador).trim() === String(v).trim());
+        setValuador(v);
+        setMuestras(m);
+        setIdx(0);
+        setResultados([]);
+        setSesionId(new Date().toISOString().replace(/[:.]/g, '-'));
+        setVista('evaluacion');
+        // inicializar buffer por muestra
+        const buf = m.map(() => {
+          const b = {};
+          atributos.forEach(a => b[a] = 0);
+          return b;
+        });
+        setBuffer(buf);
+        // reset slider values
+        const init = {};
+        atributos.forEach(a => init[a] = 0);
+        setValores(init);
+      };
+
+      const handleSlider = (a, val) => {
+        setValores(prev => ({...prev, [a]: Number(val)}));
+      };
+
+      const enviarMuestra = async () => {
+        const info = muestras[idx];
+        // id único por evaluador + sesión + posición: si vuelve atrás y
+        // re-envía, se ACTUALIZA la fila en vez de duplicarla.
+        const payload = {
+          id: `${valuador}|${sesionId}|${idx + 1}`,
+          Sesion: sesionId,
+          Valuador: valuador,
+          Orden: idx + 1,
+          NombreProducto: info.NombreProducto,
+          CodigoProducto: String(info.CodigoProducto),
+          Muestra: String(info.Muestra ?? (idx+1)),
+          timestamp: new Date().toLocaleString('es-AR'),
+          ...valores,
+        };
+        setResultados(prev => {
+          const r = [...prev];
+          r[idx] = payload;
+          return r;
+        });
+        const newBuf = [...buffer];
+        newBuf[idx] = {...valores};
+        setBuffer(newBuf);
+
+        // Se guarda primero en la cola local y luego se intenta subir.
+        encolar(payload);
+        setPendientes(leerCola().length);
+        setEnviando(true);
+        vaciarCola().then(n => { setPendientes(n); setEnviando(false); });
+
+        if (idx < muestras.length - 1) {
+          const next = idx + 1;
+          setIdx(next);
+          setValores(newBuf[next]);
+          window.scrollTo(0,0);
+        } else {
+          setVista('completado');
+        }
+      };
+
+      const volver = () => {
+        if (idx > 0) {
+          const newBuf = [...buffer];
+          newBuf[idx] = {...valores};
+          setBuffer(newBuf);
+          const prev = idx - 1;
+          setIdx(prev);
+          setValores(newBuf[prev]);
+          window.scrollTo(0,0);
+        }
+      };
+
+      const csvGenerado = useMemo(() => {
+        const headers = ['Valuador','NombreProducto','CodigoProducto','Muestra','timestamp', ...atributos];
+        const lines = [headers.join(',')];
+        resultados.filter(Boolean).forEach(r => {
+          const row = headers.map(h => r[h] ?? '');
+          lines.push(row.join(','));
+        });
+        return lines.join('\n');
+      }, [resultados, atributos]);
+
+      const descargarCSV = () => {
+        if (!resultados.length) { alert('No hay resultados para descargar.'); return; }
+        const blob = new Blob([csvGenerado], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `resultados_${valuador}_${new Date().toISOString().split('T')[0]}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      };
+
+      const reintentar = async () => {
+        setEnviando(true);
+        setPendientes(await vaciarCola());
+        setEnviando(false);
+      };
+
+      // Indicador de estado de la nube (se muestra en evaluación y al final)
+      const EstadoNube = () => (
+        pendientes === 0
+          ? <p className="text-sm text-emerald-600 font-semibold">☁️ {enviando ? 'Guardando…' : 'Todo guardado en la nube'}</p>
+          : <p className="text-sm text-amber-600 font-semibold">
+              ⏳ {pendientes} respuesta(s) pendiente(s) de subir {enviando ? '(enviando…)' : '(se reintenta sola)'}
+            </p>
+      );
+
+      // --- UI ---
+      if (loading) {
+        return (
+          <div className="min-h-screen flex items-center justify-center p-6">
+            <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full text-center">
+              <div className="w-16 h-16 mx-auto text-purple-600 mb-4"><Wine/></div>
+              <h2 className="text-2xl font-bold text-gray-800 mb-2">Cargando...</h2>
+              <p className="text-gray-600">Intentando leer <code>diseno.csv</code> y <code>atributos.csv</code></p>
+            </div>
+          </div>
+        );
+      }
+
+      if (needsManualUpload) {
+        return (
+          <div className="min-h-screen flex items-center justify-center p-6">
+            <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-lg w-full">
+              <h1 className="text-2xl font-bold text-gray-800 mb-4">Subir CSVs</h1>
+              <p className="text-gray-600 mb-4">
+                No se pudieron leer automáticamente los archivos. Subí <strong>diseno.csv</strong> y <strong>atributos.csv</strong> (cabeceras esperadas: <code>Valuador,Muestra,NombreProducto,CodigoProducto</code> y <code>Nombre</code>).
+              </p>
+              <div className="space-y-3">
+                <div>
+                  <label className="font-semibold">diseno.csv</label>
+                  <input type="file" accept=".csv,text/csv" className="block w-full mt-1" onChange={e => setManualDiseno(e.target.files?.[0] ?? null)} />
+                </div>
+                <div>
+                  <label className="font-semibold">atributos.csv</label>
+                  <input type="file" accept=".csv,text/csv" className="block w-full mt-1" onChange={e => setManualAtributos(e.target.files?.[0] ?? null)} />
+                </div>
+                <button
+                  onClick={() => onManualUpload(manualDiseno, manualAtributos)}
+                  disabled={!manualDiseno || !manualAtributos}
+                  className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 rounded-lg mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Cargar y continuar
+                </button>
+              </div>
+              {error && <p className="text-red-600 mt-4">{error}</p>}
+            </div>
+          </div>
+        );
+      }
+
+      if (vista === 'seleccion') {
+        return (
+          <div className="min-h-screen flex items-center justify-center p-6">
+            <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
+              <div className="text-center mb-8">
+                <div className="w-16 h-16 mx-auto text-purple-600 mb-4"><Wine/></div>
+                <h1 className="text-3xl font-bold text-gray-800 mb-2">Análisis Sensorial</h1>
+                <p className="text-gray-600">Selecciona tu evaluador</p>
+                <p className="text-xs text-gray-500 mt-2">{diseno.length} filas en diseño • {atributos.length} atributos</p>
+              </div>
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {evaluadores.map(v => (
+                  <button key={v} onClick={() => handleSeleccionValuador(v)}
+                    className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold py-3 px-6 rounded-lg transition-all">
+                    Evaluador {v}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      if (vista === 'completado') {
+        return (
+          <div className="min-h-screen flex items-center justify-center p-6">
+            <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full text-center">
+              <div className="w-24 h-24 mx-auto text-green-600 mb-6"><CheckCircle/></div>
+              <h1 className="text-3xl font-bold text-gray-800 mb-4">¡Completado!</h1>
+              <p className="text-gray-600 mb-2">Has evaluado todas las muestras.</p>
+              <p className="text-gray-600 mb-6">Gracias por tu participación, <strong>{valuador}</strong></p>
+              <div className="mb-6 p-4 rounded-lg bg-gray-50 border"><EstadoNube/></div>
+              <div className="space-y-3">
+                {pendientes > 0 && (
+                  <button onClick={reintentar} disabled={enviando}
+                    className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3 px-6 rounded-lg disabled:opacity-50">
+                    Reintentar envío ahora
+                  </button>
+                )}
+                <button onClick={() => { setVista('seleccion'); setValuador(''); setResultados([]); }}
+                  className="w-full bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-3 px-6 rounded-lg">
+                  Volver al Inicio
+                </button>
+                <button onClick={descargarCSV}
+                  className="w-full text-blue-600 hover:underline text-sm py-2 flex items-center justify-center gap-1">
+                  <div className="w-4 h-4"><DownloadIcon/></div> Descargar copia CSV (opcional)
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      const info = muestras[idx] ?? {};
+      return (
+        <div className="min-h-screen py-8 px-4">
+          <div className="max-w-4xl mx-auto">
+            <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 mb-6 border border-white/20">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-white">Evaluador: {valuador}</h2>
+                  <p className="text-purple-200">Muestra {idx + 1} de {muestras.length}</p>
+                  <div className="mt-1"><EstadoNube/></div>
+                </div>
+                <div className="w-12 h-12 text-purple-300"><Wine/></div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-gradient-to-br from-yellow-400 to-orange-500 rounded-lg p-4 shadow-lg">
+                  <p className="text-gray-800 font-semibold text-sm mb-1">Código de Muestra</p>
+                  <p className="text-gray-900 text-4xl font-bold">{info.CodigoProducto}</p>
+                </div>
+                <div className="bg-white/20 rounded-lg p-4 border-2 border-white/40">
+                  <p className="text-white font-semibold text-sm mb-2">Progreso</p>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 bg-white/30 rounded-full h-4">
+                      <div className="bg-gradient-to-r from-green-400 to-emerald-500 h-4 rounded-full transition-all shadow-md" style={{width: ((idx + 1) / Math.max(1,muestras.length)) * 100 + '%'}}/>
+                    </div>
+                    <span className="text-white font-bold text-lg">{Math.round(((idx + 1) / Math.max(1,muestras.length)) * 100)}%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 mb-6 border border-white/20">
+              <h3 className="text-xl font-bold text-white mb-6">Evaluación de Atributos</h3>
+              <div className="space-y-6">
+                {atributos.map(attr => (
+                  <div key={attr} className="bg-gradient-to-r from-slate-800/80 to-slate-700/80 rounded-lg p-5 border-2 border-slate-600/50 shadow-lg">
+                    <div className="flex justify-between items-center mb-3">
+                      <label className="text-white font-semibold text-lg drop-shadow-md">{attr}</label>
+                      <span className="bg-gradient-to-r from-pink-500 to-rose-500 text-white px-5 py-2 rounded-full font-bold text-xl min-w-[70px] text-center shadow-lg">
+                        {(valores[attr] ?? 0).toFixed(1)}
+                      </span>
+                    </div>
+                    <input type="range" min="0" max="10" step="0.1" value={valores[attr] ?? 0}
+                      onChange={e => handleSlider(attr, e.target.value)}
+                      className="w-full h-4 bg-slate-300 rounded-lg appearance-none cursor-pointer shadow-inner"
+                      style={{background:`linear-gradient(to right,#f59e0b 0%,#f59e0b ${(valores[attr]||0)*10}%,#cbd5e1 ${(valores[attr]||0)*10}%,#cbd5e1 100%)`}} />
+                    <div className="flex justify-between text-gray-200 font-semibold text-sm mt-2">
+                      <span>0</span><span>5</span><span>10</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <button onClick={enviarMuestra}
+                className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-4 px-8 rounded-xl transition-all shadow-2xl flex items-center justify-center gap-3 text-lg">
+                {idx < (muestras.length - 1) ? <>Enviar y Continuar <div className="w-6 h-6"><ChevronRight/></div></> : <>Finalizar Evaluación <div className="w-6 h-6"><CheckCircle/></div></>}
+              </button>
+              {idx > 0 && (
+                <button onClick={volver}
+                  className="w-full bg-white/10 hover:bg-white/20 border-2 border-white/30 text-white font-semibold py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2">
+                  <div className="w-5 h-5"><ChevronLeft/></div> Volver a la muestra anterior
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
+</body>
+</html>
