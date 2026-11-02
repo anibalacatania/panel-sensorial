@@ -9,7 +9,7 @@ App web para análisis sensorial. Los evaluadores puntúan cada muestra y las re
 | `index.html` | La app |
 | `diseno.csv` | Diseño: `Valuador,Muestra,NombreProducto,CodigoProducto` |
 | `atributos.csv` | Atributos: columna `Nombre` |
-| `Codigo.gs` | Script que recibe los datos en Google Sheets (no se sube a GitHub, va en Apps Script) |
+| `Codigo.gs` | Script que recibe los datos en Google Sheets (se copia y pega en Apps Script; acá queda como referencia) |
 
 Para un panel nuevo, reemplazá `diseno.csv` y `atributos.csv` en el repositorio. Si no están, la app pide subirlos a mano.
 

@@ -59,7 +59,7 @@
             }
             setDiseno(parsedDiseno);
             setAtributos(parsedAtributos);
-            setEvaluadores([...new Set(parsedDiseno.map(r => String(r.Valuador).trim()))].sort());
+            setEvaluadores([...new Set(parsedDiseno.map(r => String(r.Valuador).trim()))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})));
             setLoading(false);
           } catch (e) {
             console.warn('Fallo lectura automática. Se habilita carga manual.', e);
@@ -80,7 +80,7 @@
           }
           setDiseno(parsedDiseno);
           setAtributos(parsedAtributos);
-          setEvaluadores([...new Set(parsedDiseno.map(r => String(r.Valuador).trim()))].sort());
+          setEvaluadores([...new Set(parsedDiseno.map(r => String(r.Valuador).trim()))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})));
           setNeedsManualUpload(false);
           setError(null);
         } catch (e) {
