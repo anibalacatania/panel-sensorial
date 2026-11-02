@@ -198,8 +198,20 @@
 
     // Envía a Google Sheets. Se usa text/plain para evitar el "preflight" CORS
     // (Apps Script no lo soporta; por eso con application/json fallaba).
+    // La URL real se lee de config.json SIN caché, así un cambio de script
+    // llega a todos al instante aunque el navegador tenga una copia vieja.
+    let urlResuelta = null;
+    async function obtenerURL() {
+      if (urlResuelta) return urlResuelta;
+      try {
+        const c = await (await fetch('config.json?v=' + Date.now(), { cache: 'no-store' })).json();
+        if (c && c.scriptUrl) urlResuelta = c.scriptUrl;
+      } catch {}
+      return urlResuelta || GOOGLE_SCRIPT_URL;
+    }
+
     async function enviarANube(payload) {
-      const res = await fetch(GOOGLE_SCRIPT_URL, {
+      const res = await fetch(await obtenerURL(), {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(payload),
